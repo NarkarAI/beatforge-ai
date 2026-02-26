@@ -134,14 +134,16 @@ const CHORD_PROGRESSIONS = {
 const NOTE_C3 = 130.81;
 const NOTE_C4 = 261.63;
 
-// Vowel formant frequencies for vocal synthesis
+// Vowel formant frequencies for vocal synthesis (5 formants with bandwidths)
 const FORMANTS = {
-  a: { f1: 800, f2: 1150, f3: 2800, gain: [1, 0.5, 0.3] },
-  e: { f1: 400, f2: 1600, f3: 2700, gain: [1, 0.4, 0.2] },
-  i: { f1: 350, f2: 2300, f3: 3000, gain: [1, 0.3, 0.2] },
-  o: { f1: 450, f2: 800,  f3: 2830, gain: [1, 0.3, 0.2] },
-  u: { f1: 325, f2: 700,  f3: 2530, gain: [1, 0.2, 0.1] }
+  a: { f: [800,1150,2800,3500,4950], bw: [80,90,120,130,140], gain: [1.0,0.50,0.30,0.15,0.05] },
+  e: { f: [400,1600,2700,3300,4950], bw: [70,80,100,120,120], gain: [1.0,0.40,0.20,0.10,0.03] },
+  i: { f: [350,2300,3000,3700,4950], bw: [60,90,100,120,120], gain: [1.0,0.30,0.20,0.10,0.03] },
+  o: { f: [450,800,2830,3500,4950],  bw: [70,80,100,130,135], gain: [1.0,0.30,0.20,0.10,0.03] },
+  u: { f: [325,700,2530,3500,4950],  bw: [50,60,100,135,140], gain: [1.0,0.20,0.10,0.05,0.02] }
 };
+
+const VOCAL_RANGE = { low: 130.81, high: 523.25, sweet: 261.63 };
 
 class AudioEngine {
   constructor() {
@@ -495,51 +497,208 @@ class AudioEngine {
     osc.stop(time + duration + 0.01);
   }
 
-  // ---- Vocal Synthesis (Formant) ----
+  // ---- Vocal Synthesis (Rich Formant) ----
 
-  _playVocalNote(ctx, dest, time, freq, duration, vowel) {
+  _playVocalNote(ctx, dest, time, freq, duration, vowel, options = {}) {
     const formant = FORMANTS[vowel] || FORMANTS['a'];
-    const source = ctx.createOscillator();
-    source.type = 'sawtooth';
-    source.frequency.setValueAtTime(freq, time);
+    const isRap = options.style === 'rap';
+    const endTime = time + duration;
 
-    // Vibrato
-    const vib = ctx.createOscillator();
-    const vibGain = ctx.createGain();
-    vib.frequency.value = 5.5;
-    vibGain.gain.value = 4;
-    vib.connect(vibGain);
-    vibGain.connect(source.frequency);
-    vib.start(time);
-    vib.stop(time + duration);
+    // Portamento: glide from previous pitch if legato
+    let startFreq = freq;
+    if (options.isLegato && options.prevFreq) {
+      const semitoneGap = Math.abs(12 * Math.log2(freq / options.prevFreq));
+      if (semitoneGap <= 7) startFreq = options.prevFreq;
+    }
+    const glideEnd = time + 0.08;
 
-    const merger = ctx.createGain();
-    merger.gain.value = 1;
+    // --- Multi-oscillator source ---
+    const sourceMix = ctx.createGain();
+    sourceMix.gain.value = 1;
 
-    [formant.f1, formant.f2, formant.f3].forEach((fFreq, idx) => {
+    // Primary sawtooth
+    const saw = ctx.createOscillator();
+    saw.type = 'sawtooth';
+    saw.frequency.setValueAtTime(startFreq, time);
+    if (startFreq !== freq) saw.frequency.exponentialRampToValueAtTime(freq, glideEnd);
+    const sawGain = ctx.createGain();
+    sawGain.gain.value = 0.45;
+    saw.connect(sawGain);
+    sawGain.connect(sourceMix);
+
+    // Detuned sawtooth for chorus
+    const saw2 = ctx.createOscillator();
+    saw2.type = 'sawtooth';
+    saw2.frequency.setValueAtTime(startFreq, time);
+    if (startFreq !== freq) saw2.frequency.exponentialRampToValueAtTime(freq, glideEnd);
+    saw2.detune.setValueAtTime(3, time);
+    const saw2Gain = ctx.createGain();
+    saw2Gain.gain.value = 0.25;
+    saw2.connect(saw2Gain);
+    saw2Gain.connect(sourceMix);
+
+    // Sub square one octave below for chest warmth
+    const sub = ctx.createOscillator();
+    sub.type = 'square';
+    sub.frequency.setValueAtTime(startFreq / 2, time);
+    if (startFreq !== freq) sub.frequency.exponentialRampToValueAtTime(freq / 2, glideEnd);
+    const subGain = ctx.createGain();
+    subGain.gain.value = 0.10;
+    sub.connect(subGain);
+    subGain.connect(sourceMix);
+
+    // Triangle for body
+    const tri = ctx.createOscillator();
+    tri.type = 'triangle';
+    tri.frequency.setValueAtTime(startFreq, time);
+    if (startFreq !== freq) tri.frequency.exponentialRampToValueAtTime(freq, glideEnd);
+    const triGain = ctx.createGain();
+    triGain.gain.value = 0.20;
+    tri.connect(triGain);
+    triGain.connect(sourceMix);
+
+    // --- Natural vibrato (delayed onset) ---
+    const vibLfo = ctx.createOscillator();
+    vibLfo.type = 'sine';
+    vibLfo.frequency.setValueAtTime(5.2, time);
+    vibLfo.frequency.linearRampToValueAtTime(5.8, time + duration * 0.5);
+    vibLfo.frequency.linearRampToValueAtTime(5.0, endTime);
+    const vibDepth = ctx.createGain();
+    if (isRap) {
+      vibDepth.gain.setValueAtTime(0, time);
+    } else {
+      vibDepth.gain.setValueAtTime(0, time);
+      vibDepth.gain.setValueAtTime(0, time + 0.15);
+      vibDepth.gain.linearRampToValueAtTime(freq * 0.006, time + 0.4);
+      if (duration > 0.5) {
+        vibDepth.gain.setValueAtTime(freq * 0.006, endTime - 0.15);
+        vibDepth.gain.linearRampToValueAtTime(freq * 0.003, endTime);
+      }
+    }
+    vibLfo.connect(vibDepth);
+    vibDepth.connect(saw.frequency);
+    vibDepth.connect(saw2.frequency);
+    vibDepth.connect(tri.frequency);
+    const vibSubScale = ctx.createGain();
+    vibSubScale.gain.value = 0.5;
+    vibLfo.connect(vibSubScale);
+    vibSubScale.connect(sub.frequency);
+
+    // --- Breathiness (filtered noise) ---
+    const noiseDur = Math.ceil(duration + 0.5);
+    const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * noiseDur, ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseData.length; i++) noiseData[i] = Math.random() * 2 - 1;
+    const noiseSource = ctx.createBufferSource();
+    noiseSource.buffer = noiseBuf;
+    const noiseFilter = ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.value = 2000;
+    noiseFilter.Q.value = 0.5;
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, time);
+    noiseGain.gain.linearRampToValueAtTime(0.08, time + 0.02);
+    noiseGain.gain.linearRampToValueAtTime(0.04, time + 0.1);
+    noiseGain.gain.setValueAtTime(0.04, endTime - 0.1);
+    noiseGain.gain.linearRampToValueAtTime(0.07, endTime - 0.02);
+    noiseGain.gain.linearRampToValueAtTime(0, endTime);
+    noiseSource.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+
+    // --- 5 Formant filter bank ---
+    const formantMerger = ctx.createGain();
+    formantMerger.gain.value = 1;
+    const formantFilters = [];
+    const formantGains = [];
+
+    for (let i = 0; i < 5; i++) {
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
-      bp.frequency.value = fFreq;
-      bp.Q.value = 5;
+      bp.frequency.setValueAtTime(formant.f[i], time);
+      bp.Q.value = formant.f[i] / formant.bw[i];
 
       const fGain = ctx.createGain();
-      fGain.gain.value = formant.gain[idx] * 0.55;
+      fGain.gain.value = formant.gain[i] * 0.5;
 
-      source.connect(bp);
+      sourceMix.connect(bp);
       bp.connect(fGain);
-      fGain.connect(merger);
-    });
+      fGain.connect(formantMerger);
+      formantFilters.push(bp);
+      formantGains.push(fGain);
+    }
 
+    // Also route noise through the formant bank
+    for (let i = 0; i < 5; i++) {
+      noiseGain.connect(formantFilters[i]);
+    }
+
+    // --- Vowel transition ---
+    if (options.nextVowel && duration > 0.4) {
+      const nextF = FORMANTS[options.nextVowel] || FORMANTS['a'];
+      const tStart = time + duration * 0.4;
+      const tEnd = time + duration * 0.7;
+      for (let i = 0; i < 5; i++) {
+        formantFilters[i].frequency.setValueAtTime(formant.f[i], tStart);
+        formantFilters[i].frequency.linearRampToValueAtTime(nextF.f[i], tEnd);
+        formantGains[i].gain.setValueAtTime(formant.gain[i] * 0.5, tStart);
+        formantGains[i].gain.linearRampToValueAtTime(nextF.gain[i] * 0.5, tEnd);
+      }
+    }
+
+    // --- Post-processing: waveshaper (warmth) + presence EQ + de-ess ---
+    const waveshaper = ctx.createWaveShaper();
+    const curve = new Float32Array(256);
+    for (let j = 0; j < 256; j++) {
+      const x = (j / 128) - 1;
+      curve[j] = (Math.PI + 3) * x / (Math.PI + 3 * Math.abs(x));
+    }
+    waveshaper.curve = curve;
+    waveshaper.oversample = '2x';
+
+    const presenceEq = ctx.createBiquadFilter();
+    presenceEq.type = 'peaking';
+    presenceEq.frequency.value = 3200;
+    presenceEq.Q.value = 1.5;
+    presenceEq.gain.value = 4;
+
+    const deEss = ctx.createBiquadFilter();
+    deEss.type = 'peaking';
+    deEss.frequency.value = 7000;
+    deEss.Q.value = 2;
+    deEss.gain.value = -3;
+
+    // --- Amplitude envelope ---
     const envelope = ctx.createGain();
-    envelope.gain.setValueAtTime(0, time);
-    envelope.gain.linearRampToValueAtTime(1, time + 0.04);
-    envelope.gain.setValueAtTime(1, time + duration - 0.06);
-    envelope.gain.linearRampToValueAtTime(0, time + duration);
+    if (isRap) {
+      envelope.gain.setValueAtTime(0, time);
+      envelope.gain.linearRampToValueAtTime(1.0, time + 0.015);
+      envelope.gain.setValueAtTime(1.0, time + duration * 0.6);
+      envelope.gain.exponentialRampToValueAtTime(0.001, endTime);
+    } else {
+      const attackTime = options.isLegato ? 0.02 : 0.08;
+      const releaseTime = Math.min(0.12, duration * 0.3);
+      envelope.gain.setValueAtTime(options.isLegato ? 0.7 : 0, time);
+      envelope.gain.linearRampToValueAtTime(1.0, time + attackTime);
+      if (duration > 0.3) {
+        envelope.gain.linearRampToValueAtTime(1.05, time + duration * 0.4);
+        envelope.gain.linearRampToValueAtTime(0.95, time + duration * 0.7);
+      }
+      envelope.gain.setValueAtTime(0.95, endTime - releaseTime);
+      envelope.gain.linearRampToValueAtTime(0, endTime);
+    }
 
-    merger.connect(envelope);
+    // --- Signal chain ---
+    formantMerger.connect(waveshaper);
+    waveshaper.connect(presenceEq);
+    presenceEq.connect(deEss);
+    deEss.connect(envelope);
     envelope.connect(dest);
-    source.start(time);
-    source.stop(time + duration + 0.01);
+
+    // Start/stop all sources
+    const allOsc = [saw, saw2, sub, tri, vibLfo];
+    allOsc.forEach(o => { o.start(time); o.stop(endTime + 0.01); });
+    noiseSource.start(time);
+    noiseSource.stop(endTime + 0.01);
   }
 
   // ---- Song Generation ----
@@ -580,6 +739,120 @@ class AudioEngine {
       }
     }
     return pattern;
+  }
+
+  _generateVocalMelody(totalSteps, stepsPerBar, chords, mood, vocalStyle, wordCount) {
+    const scales = {
+      energetic: [0, 2, 4, 5, 7, 9, 11, 12],
+      happy:     [0, 2, 4, 5, 7, 9, 11, 12],
+      chill:     [0, 2, 4, 7, 9, 12],
+      dark:      [0, 2, 3, 5, 7, 8, 10, 12],
+      melancholic: [0, 2, 3, 5, 7, 8, 10, 12]
+    };
+    const scale = scales[mood] || scales.energetic;
+    const isRap = vocalStyle === 'rap';
+    const notes = [];
+    const totalBars = Math.floor(totalSteps / stepsPerBar);
+
+    // Phrase contours: direction patterns for 2-bar phrases
+    const contours = ['arch', 'descend', 'ascend', 'valley'];
+    let scaleIdx = Math.floor(scale.length / 2);
+    let wordIdx = 0;
+
+    for (let bar = 0; bar < totalBars; bar++) {
+      // Skip intro (first 2 bars) and outro (last 2 bars)
+      if (bar < 2 || bar >= totalBars - 2) continue;
+
+      // Rest bars for phrasing (every 4th bar, take a break)
+      if ((bar - 2) % 8 === 7) continue;
+
+      const phraseBar = (bar - 2) % 8;
+      const contour = contours[Math.floor(phraseBar / 2) % contours.length];
+      const barStart = bar * stepsPerBar;
+
+      if (isRap) {
+        // Rap: eighth-note rhythm with gaps
+        for (let s = 0; s < stepsPerBar; s += 2) {
+          if (Math.random() < 0.3) continue; // 30% rest
+          const step = barStart + s;
+          if (step >= totalSteps) break;
+
+          // Small pitch variation for rap (stay within a 4th)
+          const move = Math.floor(Math.random() * 3) - 1;
+          scaleIdx = Math.max(
+            Math.floor(scale.length / 2) - 2,
+            Math.min(Math.floor(scale.length / 2) + 2, scaleIdx + move)
+          );
+          const semitone = scale[scaleIdx];
+          const prevNote = notes.length > 0 ? notes[notes.length - 1] : null;
+          const isLegato = prevNote && (step - prevNote.step - prevNote.durationSteps) <= 1;
+
+          notes.push({
+            step,
+            semitone,
+            durationSteps: 1 + Math.floor(Math.random() * 2),
+            vowelIdx: wordIdx % wordCount,
+            isLegato
+          });
+          wordIdx++;
+        }
+      } else {
+        // Singing: quarter-note rhythm with held notes
+        const beatsInBar = [0, 4, 8, 12]; // step offsets within bar
+        const phraseProgress = phraseBar / 7; // 0..1 across phrase
+
+        for (let b = 0; b < beatsInBar.length; b++) {
+          // Occasional rests (more at phrase boundaries)
+          if (b === 0 && phraseBar % 4 === 3 && Math.random() < 0.5) continue;
+          if (Math.random() < 0.15) continue;
+
+          const step = barStart + beatsInBar[b];
+          if (step >= totalSteps) break;
+
+          // Move through scale based on contour
+          let move;
+          switch (contour) {
+            case 'arch':
+              move = b < 2 ? 1 : -1;
+              break;
+            case 'valley':
+              move = b < 2 ? -1 : 1;
+              break;
+            case 'ascend':
+              move = Math.random() < 0.7 ? 1 : 0;
+              break;
+            case 'descend':
+              move = Math.random() < 0.7 ? -1 : 0;
+              break;
+            default:
+              move = Math.floor(Math.random() * 3) - 1;
+          }
+          // Occasional leap of a 3rd
+          if (Math.random() < 0.15) move *= 2;
+
+          scaleIdx = Math.max(0, Math.min(scale.length - 1, scaleIdx + move));
+          const semitone = scale[scaleIdx];
+
+          // Duration: 2-8 steps (half-beat to 2 beats), longer on strong beats
+          let dur = (b === 0 || b === 2)
+            ? 4 + Math.floor(Math.random() * 5)
+            : 2 + Math.floor(Math.random() * 3);
+
+          const prevNote = notes.length > 0 ? notes[notes.length - 1] : null;
+          const isLegato = prevNote && (step - prevNote.step - prevNote.durationSteps) <= 1;
+
+          notes.push({
+            step,
+            semitone,
+            durationSteps: dur,
+            vowelIdx: wordIdx % wordCount,
+            isLegato
+          });
+          wordIdx++;
+        }
+      }
+    }
+    return notes;
   }
 
   async generate(params) {
@@ -644,6 +917,24 @@ class AudioEngine {
     const words = this._parseLyrics(this.lyrics);
     const melodyPattern = this._generateMelodyPattern(totalSteps, this.mood);
 
+    // Generate vocal melody for singing/rap
+    let vocalNotes = [];
+    const vocalNoteMap = new Map();
+    if ((this.vocalStyle === 'singing' || this.vocalStyle === 'rap') && words.length > 0) {
+      vocalNotes = this._generateVocalMelody(
+        totalSteps, stepsPerBar, chords, this.mood, this.vocalStyle, words.length
+      );
+      vocalNotes.forEach(note => vocalNoteMap.set(note.step, note));
+    }
+
+    // Mix buses for ducking
+    const padBus = offCtx.createGain();
+    padBus.gain.value = 1.0;
+    padBus.connect(master);
+    const melodyBus = offCtx.createGain();
+    melodyBus.gain.value = 1.0;
+    melodyBus.connect(master);
+
     // Schedule all notes
     let wordIdx = 0;
 
@@ -702,7 +993,7 @@ class AudioEngine {
         const padDur = stepDuration * stepsPerBar;
         const padGain = offCtx.createGain();
         padGain.gain.value = isChorus ? 1.2 : 0.8;
-        padGain.connect(master);
+        padGain.connect(padBus);
         this._playPad(offCtx, padGain, t, padFreqs, padDur, genre);
       }
 
@@ -711,30 +1002,51 @@ class AudioEngine {
         const melNote = melodyPattern[step % melodyPattern.length];
         const melFreq = this._freqHigh(melNote + 12);
         const melDur = stepDuration * (1 + Math.floor(Math.random() * 3));
-        this._playMelody(offCtx, master, t, melFreq, Math.min(melDur, stepDuration * 4));
+        this._playMelody(offCtx, melodyBus, t, melFreq, Math.min(melDur, stepDuration * 4));
       }
 
-      // Vocals
-      if (this.vocalStyle !== 'instrumental' && words.length > 0) {
-        const isVocalStep = this.vocalStyle === 'rap'
-          ? (patIdx % 2 === 0 && Math.random() < 0.7)
-          : (patIdx % 4 === 0);
+      // Vocals (singing/rap via rich formant synthesis)
+      if ((this.vocalStyle === 'singing' || this.vocalStyle === 'rap') && words.length > 0) {
+        const vocalNote = vocalNoteMap.get(step);
+        if (vocalNote && !isIntro && !isOutro) {
+          const w = words[vocalNote.vowelIdx % words.length];
+          const vocalSemitone = vocalNote.semitone + this.vocalPitch;
+          const vocalFreq = Math.max(VOCAL_RANGE.low,
+            Math.min(VOCAL_RANGE.high, this._freqHigh(vocalSemitone)));
+          const vocalDur = vocalNote.durationSteps * stepDuration;
 
-        if (isVocalStep && !isIntro && !isOutro && wordIdx < words.length * 3) {
-          const w = words[wordIdx % words.length];
-          const vocalSemitone = chord[0] + 12 + this.vocalPitch;
-          const vocalFreq = this._freq(vocalSemitone);
-          const vocalDur = this.vocalStyle === 'rap'
-            ? stepDuration * 0.8
-            : stepDuration * (2 + Math.random() * 2);
+          // Next vowel for transition
+          const nextWord = words[(vocalNote.vowelIdx + 1) % words.length];
+          const nextVowel = (vocalDur > 0.4) ? nextWord.vowel : null;
+
+          // Previous frequency for portamento
+          let prevFreq = null;
+          if (vocalNote.isLegato) {
+            for (let s = step - 1; s >= Math.max(0, step - 8); s--) {
+              if (vocalNoteMap.has(s)) {
+                const pNote = vocalNoteMap.get(s);
+                prevFreq = Math.max(VOCAL_RANGE.low,
+                  Math.min(VOCAL_RANGE.high, this._freqHigh(pNote.semitone + this.vocalPitch)));
+                break;
+              }
+            }
+          }
 
           const vocalGain = offCtx.createGain();
-          vocalGain.gain.value = 0.3;
+          vocalGain.gain.value = 0.55;
           vocalGain.connect(master);
 
           this._playVocalNote(offCtx, vocalGain, t, vocalFreq,
-            Math.min(vocalDur, stepDuration * 4), w.vowel);
-          wordIdx++;
+            Math.min(vocalDur, stepDuration * 8), w.vowel, {
+              prevFreq, nextVowel, isLegato: vocalNote.isLegato,
+              style: this.vocalStyle
+            });
+
+          // Duck pads and melody during vocal notes
+          padBus.gain.setValueAtTime(0.6, t);
+          padBus.gain.linearRampToValueAtTime(1.0, t + vocalDur + 0.1);
+          melodyBus.gain.setValueAtTime(0.5, t);
+          melodyBus.gain.linearRampToValueAtTime(1.0, t + vocalDur + 0.1);
         }
       }
 

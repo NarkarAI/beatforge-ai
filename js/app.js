@@ -346,7 +346,9 @@
     engine.play();
     setButtonStates('playing');
     drawVisualizer();
-    speakLyrics(lyricsInput.value);
+    if (currentVocal === 'speech') {
+      speakLyrics(lyricsInput.value);
+    }
   }
 
   engine.onPlaybackEnd = () => {
