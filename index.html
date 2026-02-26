@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BeatForge AI — Music Generator for DJs & Artists</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="logo">
+        <div class="logo-icon">
+          <svg viewBox="0 0 40 40" width="40" height="40">
+            <circle cx="20" cy="20" r="18" fill="none" stroke="url(#grad)" stroke-width="2"/>
+            <circle cx="20" cy="20" r="6" fill="url(#grad)"/>
+            <line x1="20" y1="2" x2="20" y2="10" stroke="url(#grad)" stroke-width="2"/>
+            <line x1="20" y1="30" x2="20" y2="38" stroke="url(#grad)" stroke-width="2"/>
+            <line x1="2" y1="20" x2="10" y2="20" stroke="url(#grad)" stroke-width="2"/>
+            <line x1="30" y1="20" x2="38" y2="20" stroke="url(#grad)" stroke-width="2"/>
+            <defs>
+              <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#00f0ff"/>
+                <stop offset="100%" style="stop-color:#b000ff"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <h1>BeatForge <span>AI</span></h1>
+      </div>
+      <p class="tagline">AI-Powered Music Generator for DJs & Artists</p>
+    </header>
+
+    <main>
+      <!-- Genre Selection -->
+      <section class="panel">
+        <h2 class="panel-title">Genre / Style</h2>
+        <div class="genre-grid" id="genreGrid"></div>
+      </section>
+
+      <!-- Lyrics Input -->
+      <section class="panel">
+        <h2 class="panel-title">Lyrics & Vocals</h2>
+        <textarea id="lyricsInput" class="lyrics-textarea" rows="5"
+          placeholder="Enter your lyrics, speech text, or vocal ideas here...&#10;&#10;Example:&#10;Feel the beat drop, let the rhythm take control&#10;Moving through the night, music feeds my soul"></textarea>
+        <div class="vocal-options">
+          <button class="vocal-btn active" data-vocal="singing">Singing</button>
+          <button class="vocal-btn" data-vocal="rap">Rap</button>
+          <button class="vocal-btn" data-vocal="speech">Speech</button>
+          <button class="vocal-btn" data-vocal="instrumental">Instrumental Only</button>
+        </div>
+      </section>
+
+      <!-- Parameters -->
+      <section class="panel">
+        <h2 class="panel-title">Parameters</h2>
+        <div class="params-grid">
+          <div class="param-item">
+            <label>BPM</label>
+            <div class="param-control">
+              <input type="range" id="bpmSlider" min="60" max="200" value="120" class="slider">
+              <span class="param-value" id="bpmValue">120</span>
+            </div>
+          </div>
+          <div class="param-item">
+            <label>Key</label>
+            <select id="keySelect" class="select-input">
+              <option value="0">C</option><option value="1">C#</option>
+              <option value="2">D</option><option value="3">D#</option>
+              <option value="4">E</option><option value="5">F</option>
+              <option value="6">F#</option><option value="7">G</option>
+              <option value="8">G#</option><option value="9">A</option>
+              <option value="10">A#</option><option value="11">B</option>
+            </select>
+          </div>
+          <div class="param-item">
+            <label>Mood</label>
+            <select id="moodSelect" class="select-input">
+              <option value="energetic">Energetic</option>
+              <option value="chill">Chill</option>
+              <option value="dark">Dark</option>
+              <option value="happy">Happy</option>
+              <option value="melancholic">Melancholic</option>
+            </select>
+          </div>
+          <div class="param-item">
+            <label>Duration</label>
+            <select id="durationSelect" class="select-input">
+              <option value="15">15 sec</option>
+              <option value="30" selected>30 sec</option>
+              <option value="60">1 min</option>
+              <option value="120">2 min</option>
+            </select>
+          </div>
+          <div class="param-item">
+            <label>Vocal Pitch</label>
+            <div class="param-control">
+              <input type="range" id="vocalPitch" min="-12" max="12" value="0" class="slider">
+              <span class="param-value" id="vocalPitchValue">0</span>
+            </div>
+          </div>
+          <div class="param-item">
+            <label>Reverb</label>
+            <div class="param-control">
+              <input type="range" id="reverbAmount" min="0" max="100" value="30" class="slider">
+              <span class="param-value" id="reverbValue">30%</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Visualizer -->
+      <section class="panel visualizer-panel">
+        <canvas id="visualizer"></canvas>
+        <div class="lyrics-display" id="lyricsDisplay"></div>
+      </section>
+
+      <!-- Transport Controls -->
+      <div class="transport">
+        <button class="btn btn-generate" id="generateBtn">
+          <span class="icon">&#9889;</span> Generate Track
+        </button>
+        <button class="btn btn-play" id="playBtn" disabled>
+          <span class="icon">&#9654;</span> Play
+        </button>
+        <button class="btn btn-stop" id="stopBtn" disabled>
+          <span class="icon">&#9632;</span> Stop
+        </button>
+        <button class="btn btn-download" id="downloadBtn" disabled>
+          <span class="icon">&#8595;</span> Download MP3
+        </button>
+      </div>
+
+      <!-- Progress Bar -->
+      <div class="progress-container" id="progressContainer">
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <p class="progress-text" id="progressText"></p>
+      </div>
+
+      <!-- Playback Time -->
+      <div class="playback-info" id="playbackInfo">
+        <span id="currentTime">0:00</span> / <span id="totalTime">0:00</span>
+        <div class="playback-bar">
+          <div class="playback-progress" id="playbackProgress"></div>
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      <p>BeatForge AI &copy; 2026 &mdash; Web Audio Powered Music Generation for DJs & Artists</p>
+    </footer>
+  </div>
+
+  <script src="js/audio-engine.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
