@@ -346,9 +346,11 @@
     engine.play();
     setButtonStates('playing');
     drawVisualizer();
+    speakLyrics(lyricsInput.value);
   }
 
   engine.onPlaybackEnd = () => {
+    stopSpeech();
     setButtonStates('ready');
     playbackProgress.style.width = '0%';
     currentTimeEl.textContent = '0:00';
@@ -356,6 +358,7 @@
 
   function handleStop() {
     engine.stop();
+    stopSpeech();
     setButtonStates('ready');
     playbackProgress.style.width = '0%';
     currentTimeEl.textContent = '0:00';
@@ -390,13 +393,56 @@
     showToast(`Downloaded ${filename}`, 'success');
   }
 
-  // ---- Speech Synthesis (for speech vocal mode preview) ----
+  // ---- Speech Synthesis (synced to playback) ----
   function speakLyrics(text) {
-    if (!('speechSynthesis' in window)) return;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.9;
-    utterance.pitch = 1 + (parseInt(vocalPitch.value) / 24);
-    window.speechSynthesis.speak(utterance);
+    if (!('speechSynthesis' in window) || !text || !text.trim()) return;
+    if (currentVocal === 'instrumental') return;
+
+    window.speechSynthesis.cancel();
+
+    const lines = text.trim().split('\n').filter(l => l.trim());
+    const bpm = parseInt(bpmSlider.value);
+    const secPerBeat = 60 / bpm;
+    // Start vocals after 2-bar intro (8 beats)
+    let delay = secPerBeat * 8;
+
+    lines.forEach((line) => {
+      const utterance = new SpeechSynthesisUtterance(line.trim());
+      const pitchShift = parseInt(vocalPitch.value) / 24;
+
+      switch (currentVocal) {
+        case 'rap':
+          utterance.rate = 1.4;
+          utterance.pitch = 0.8 + pitchShift;
+          break;
+        case 'speech':
+          utterance.rate = 1.0;
+          utterance.pitch = 1.0 + pitchShift;
+          break;
+        case 'singing':
+        default:
+          utterance.rate = 0.7;
+          utterance.pitch = 1.3 + pitchShift;
+          break;
+      }
+
+      setTimeout(() => {
+        if (engine.isPlaying) {
+          window.speechSynthesis.speak(utterance);
+        }
+      }, delay * 1000);
+
+      // Estimate line duration and advance delay
+      const wordsInLine = line.trim().split(/\s+/).length;
+      const lineDuration = (wordsInLine / utterance.rate) * 0.35;
+      delay += Math.max(lineDuration, secPerBeat * 2);
+    });
+  }
+
+  function stopSpeech() {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
   }
 
   // ---- Event Listeners ----

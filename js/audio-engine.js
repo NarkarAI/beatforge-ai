@@ -729,7 +729,7 @@ class AudioEngine {
             : stepDuration * (2 + Math.random() * 2);
 
           const vocalGain = offCtx.createGain();
-          vocalGain.gain.value = 1.4;
+          vocalGain.gain.value = 0.3;
           vocalGain.connect(master);
 
           this._playVocalNote(offCtx, vocalGain, t, vocalFreq,
