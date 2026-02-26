@@ -520,10 +520,10 @@ class AudioEngine {
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
       bp.frequency.value = fFreq;
-      bp.Q.value = 12;
+      bp.Q.value = 5;
 
       const fGain = ctx.createGain();
-      fGain.gain.value = formant.gain[idx] * 0.15;
+      fGain.gain.value = formant.gain[idx] * 0.55;
 
       source.connect(bp);
       bp.connect(fGain);
@@ -729,7 +729,7 @@ class AudioEngine {
             : stepDuration * (2 + Math.random() * 2);
 
           const vocalGain = offCtx.createGain();
-          vocalGain.gain.value = 0.7;
+          vocalGain.gain.value = 1.4;
           vocalGain.connect(master);
 
           this._playVocalNote(offCtx, vocalGain, t, vocalFreq,
